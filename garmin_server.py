@@ -113,8 +113,11 @@ def get_wellness(start_date: str, end_date: str) -> str:
 
 
 if __name__ == "__main__":
-    # stdio: used by backfill_garmin.py (spawns this as a subprocess).
-    # --http: used by Claude Desktop's custom connectors (needs a URL, not a subprocess).
+    # stdio (default): used by backfill_garmin.py (spawns this as a subprocess).
+    # --http: HTTPS for Claude Desktop's custom connectors (needs a URL, not a subprocess).
     import sys
-    transport = "streamable-http" if "--http" in sys.argv else "stdio"
-    mcp.run(transport=transport)
+    if "--http" in sys.argv:
+        from serve_https import serve_https
+        serve_https(mcp)
+    else:
+        mcp.run(transport="stdio")

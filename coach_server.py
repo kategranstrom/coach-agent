@@ -62,8 +62,11 @@ def save_note(content: str, note_type: str = "chat_summary") -> dict:
 
 
 if __name__ == "__main__":
-    # --http: used by Claude Desktop's custom connectors (needs a URL, not a subprocess).
+    # --http: HTTPS for Claude Desktop's custom connectors (needs a URL, not a subprocess).
     # stdio (default): matches garmin_server.py's pattern, useful for local smoke tests.
     import sys
-    transport = "streamable-http" if "--http" in sys.argv else "stdio"
-    mcp.run(transport=transport)
+    if "--http" in sys.argv:
+        from serve_https import serve_https
+        serve_https(mcp)
+    else:
+        mcp.run(transport="stdio")
