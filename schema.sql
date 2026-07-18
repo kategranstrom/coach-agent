@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS checkins (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     date              TEXT NOT NULL,
     activity_id       TEXT REFERENCES activities(activity_id),
+    activity_text     TEXT,                  -- freeform "what I did" when there's no linked Garmin activity yet (e.g. historical import)
     knee_stress       INTEGER,               -- self-rating, e.g. 1-5; nullable
     comment           TEXT,
     source            TEXT NOT NULL CHECK (source IN ('sheet_import', 'chatbot')),
