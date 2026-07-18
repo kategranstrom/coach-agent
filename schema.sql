@@ -64,6 +64,32 @@ CREATE TABLE IF NOT EXISTS sync_state (
     last_synced_at    TEXT
 );
 
+-- Domain rules: race calendar, injury thresholds, sport knee-impact tags.
+-- Plain data the orchestrator's tools read/write directly (no MCP layer --
+-- this is pure internal logic/data, not a third-party service to wrap).
+
+CREATE TABLE IF NOT EXISTS race_calendar (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    race_name         TEXT NOT NULL,
+    race_date         TEXT NOT NULL,         -- ISO date
+    distance_type     TEXT,
+    notes             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS injury_thresholds (
+    threshold_name    TEXT PRIMARY KEY,
+    value             REAL NOT NULL,
+    notes             TEXT,                  -- e.g. "starting point, not yet calibrated from your history"
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sport_impact (
+    sport             TEXT PRIMARY KEY,
+    impact_level      TEXT NOT NULL CHECK (impact_level IN ('high', 'medium', 'low')),
+    notes             TEXT,
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_activities_start_time ON activities(start_time);
 CREATE INDEX IF NOT EXISTS idx_checkins_date ON checkins(date);
 CREATE INDEX IF NOT EXISTS idx_analyses_date ON analyses(date);
