@@ -1,5 +1,11 @@
 # Coach v2 — Consolidated Spec (post-discussion revision)
 
+> **v3 update:** the reasoning layer described below (a custom orchestrator calling the
+> Claude API directly, plus a scheduled trigger) was replaced after realizing it duplicated
+> something already paid for. See "Reasoning layer" and "Trigger" below for the current
+> approach: Claude Desktop's custom MCP connectors, used interactively, on an existing Pro
+> subscription, instead of a separate metered API integration.
+
 ## Goals (updated from v1)
 - Holistic, multi-sport coaching — not swim-race-only. Knee constraints shape *what's safe*, but improvement across any sport Garmin captures is in scope.
 - Runs 1-2x/day polling Garmin for new activities (Garmin has no personal-account webhooks, so this approximates "after every activity" via frequent polling rather than true push).
@@ -29,16 +35,30 @@
 - `analyses` — past coaching notes/flags (lets the agent reference "flagged high load last week — did it resolve?")
 - `chat_history`
 
-### Reasoning layer
-- **One orchestrator agent** with tool access (Garmin MCP, custom MCP, RAG retrieval, DB) handling both:
-  (a) the auto-generated per-activity/day analysis note, and
-  (b) the chatbot conversation
-- Reusable analysis logic rather than rigid separate agents: cross-sport load/ACWR, injury risk (incl. technique trend + knee-impact tagging), race/taper context, sport-mix suggestion.
-- Split into distinct sub-agents later only if the single-prompt version starts getting confused or eval traceability demands it.
+### Reasoning layer (v3: Claude Desktop, not a custom orchestrator)
+- **No custom orchestrator script calling the Claude API directly.** That would mean paying
+  for API tokens on top of an existing Claude Pro subscription, for a chat-shaped feature
+  that subscription already covers.
+- Instead: **`garmin_server.py` and `coach_server.py` run as local MCP servers over HTTP**
+  (`--http` flag, ports 8000/8001), added to Claude Desktop as **custom connectors**
+  (Settings → Connectors → name + `http://127.0.0.1:<port>/mcp`, no OAuth needed for a
+  local server). Chatting with the coach means opening Desktop and talking to Claude
+  directly — Claude calls the tools live, using the same subscription as any other chat.
+- `rules.py` (race context, injury thresholds, sport impact) and `memory.py` (check-ins,
+  past notes) are plain Python functions, wrapped as MCP tools in `coach_server.py` — same
+  reasoning as before (internal logic, no external service to wrap), just now reachable by
+  Desktop instead of an in-process orchestrator.
+- The two servers also support stdio transport (the default, no `--http` flag) for
+  scripts like `backfill_garmin.py` that spawn them as a subprocess rather than connecting
+  over HTTP.
 
-### Trigger
-- Scheduled poll 1-2x/day (cron/GitHub Actions) — checks Garmin for new activity/wellness data since last sync, runs analysis, stores the note.
-- Manual "check now" button in the dashboard as a fallback/demo convenience.
+### Trigger (v3: on-demand, not scheduled)
+- **No scheduled/cron trigger.** A cron job needs something to call the API on a timer,
+  which is exactly the paid-API dependency this redesign avoids. There's no way to make an
+  unattended background job run "for free" on a chat subscription — nothing is chatting on
+  a timer.
+- Instead: fully on-demand. Open Desktop, ask for an update, whenever you want one. Loses
+  "proactively delivers a note without being asked," gains zero marginal cost.
 
 ### Frontend
 - Streamlit: per-activity/day stats + analysis view, load/taper trend charts, chat panel. Build incrementally alongside the orchestrator rather than saving for last — you want to see results as you go.
@@ -48,24 +68,23 @@
 - Log every agent input/output for traceability.
 - Backtest: run the system against historical weeks, compare its flags to the real flare-ups recorded in `checkins` (from the Sheet import), and report a concrete result.
 
-## Build order (revised)
-1. SQLite memory schema — first, since everything else hangs off it.
-2. Import the Google Sheet log into `checkins` (CSV export + one-time script).
-3. Custom MCP server — race calendar, taper rules, injury thresholds, sport knee-impact tagging.
-4. Wire up Garmin MCP; backfill ~12-18 months of activity + wellness data.
-5. Single orchestrator agent with tool access to both MCPs + DB — get one real end-to-end analysis note working.
-6. Add the technique-trend signal (swim first).
-7. Add sport-mix/substitution suggestions.
-8. Add the ongoing daily check-in flow (chatbot-prompted, writes to `checkins`).
-9. Wrap the orchestrator as a multi-turn chatbot (same tools, full DB context).
-10. Scheduled trigger (1-2x/day poll).
-11. Adaptive thresholds, calibrated from flare-up history.
-12. Conversational rule-tuning.
-13. Backtested eval against historical data.
-14. Dashboard — start earlier in parallel with step 5 rather than last.
+## Build order (revised, v3)
+1. ✅ SQLite memory schema.
+2. ✅ Import the Google Sheet log into `checkins`.
+3. ✅ Domain rules (`rules.py`): race calendar, injury thresholds, sport knee-impact tagging.
+4. ✅ Garmin data: custom `garmin_server.py` (replaced the unreliable community MCP server), full history backfilled (2023-01-01 → present).
+5. ✅ Check-in/note memory access (`memory.py`), wrapped with `rules.py` as MCP tools in `coach_server.py`; both servers support `--http` for Claude Desktop custom connectors.
+6. Add the technique-trend signal (swim first) — expose as another `coach_server.py` tool.
+7. Add sport-mix/substitution suggestions — same.
+8. Adaptive thresholds, calibrated from real flare-up history (currently a generic default, explicitly labeled as such).
+9. Backtested eval against historical data (`checkins` vs. what the coach actually flagged).
+10. Dashboard (Streamlit) — optional at this point; the chat interface already covers the core "ask questions, get analysis" loop.
+
+Dropped from the original plan: a custom orchestrator calling the Claude API directly, and
+a scheduled/cron trigger. See "Reasoning layer" and "Trigger" above for why.
 
 ## Stack
-Python, MCP Python SDK, Claude API, SQLite, Streamlit, cron/GitHub Actions, CSV import for the Google Sheet.
+Python, MCP Python SDK, SQLite, Claude Desktop (custom MCP connectors) for the interactive coach, Streamlit (optional, for a dashboard), CSV import for the Google Sheet.
 
 ## Honest scope note
 This is now a multi-session build, not a single weekend. A realistic first sitting is steps 1-5 (plus maybe 6): memory schema, historical import, custom MCP, Garmin backfill, and one working end-to-end analysis note. Everything past that is real, valuable, and worth building — just sequenced, not simultaneous.

@@ -32,7 +32,7 @@ DAY_CALL_DELAY = 0.15  # pacing between per-day Garmin calls -- a tight loop of 
                         # unpaced calls per chunk appears to trigger silent
                         # server-side throttling (a hang, not a clean error)
 
-mcp = FastMCP("Garmin Connect (custom)")
+mcp = FastMCP("Garmin Connect (custom)", port=8000)
 
 _client: Garmin | None = None
 
@@ -113,4 +113,8 @@ def get_wellness(start_date: str, end_date: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run()
+    # stdio: used by backfill_garmin.py (spawns this as a subprocess).
+    # --http: used by Claude Desktop's custom connectors (needs a URL, not a subprocess).
+    import sys
+    transport = "streamable-http" if "--http" in sys.argv else "stdio"
+    mcp.run(transport=transport)
