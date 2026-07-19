@@ -21,6 +21,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from db import get_connection
+from garmin_extract import extract_activity_summary, extract_wellness_summary
 
 UV = shutil.which("uv") or "uv"
 SERVER = StdioServerParameters(command=UV, args=["run", "garmin_server.py"])
@@ -55,25 +56,8 @@ def date_chunks(start: date, end: date, days: int):
         cur = chunk_end + timedelta(days=1)
 
 
-def parse_iso_datetime(activity: dict) -> str:
-    # Raw garminconnect shape: a plain "YYYY-MM-DD HH:MM:SS" string (unlike the
-    # community MCP server's reformatted {"datetime": ..., "date": ...} objects)
-    return activity["startTimeLocal"].replace(" ", "T")
-
-
 def store_activity(conn, a: dict) -> None:
-    activity_id = str(a["activityId"])
-    sport = a.get("activityType", {}).get("typeKey", "unknown")
-    start_time = parse_iso_datetime(a)
-    duration_s = a.get("duration")
-    distance_m = a.get("distance")
-    avg_hr = a.get("averageHR")
-    max_hr = a.get("maxHR")
-    calories = a.get("calories")
-    elevation_gain_m = a.get("elevationGain")
-    training_load = a.get("activityTrainingLoad")
-    avg_speed_mps = a.get("averageSpeed")
-    avg_pace_s_per_km = (1000 / avg_speed_mps) if avg_speed_mps else None
+    s = extract_activity_summary(a)
     raw_json = json.dumps(a)
 
     conn.execute(
@@ -87,8 +71,9 @@ def store_activity(conn, a: dict) -> None:
              calories=excluded.calories, elevation_gain_m=excluded.elevation_gain_m,
              training_load=excluded.training_load, avg_pace_s_per_km=excluded.avg_pace_s_per_km,
              raw_json=excluded.raw_json, synced_at=datetime('now')""",
-        (activity_id, sport, start_time, duration_s, distance_m, avg_hr, max_hr,
-         calories, elevation_gain_m, training_load, avg_pace_s_per_km, raw_json),
+        (str(s["activity_id"]), s["sport"], s["start_time"], s["duration_s"], s["distance_m"],
+         s["avg_hr"], s["max_hr"], s["calories"], s["elevation_gain_m"], s["training_load"],
+         s["avg_pace_s_per_km"], raw_json),
     )
 
 
@@ -99,6 +84,7 @@ async def backfill_activities(session, conn, start: date, end: date) -> None:
         try:
             activities = await call_tool_json(session, "get_activities", {
                 "start_date": chunk_start.isoformat(), "end_date": chunk_end.isoformat(),
+                "summary": False,  # need the full payload for the raw_json archive column
             })
         except Exception as exc:
             print(f"  WARNING: skipping activities chunk {chunk_start}..{chunk_end} due to {exc!r}")
@@ -114,24 +100,12 @@ async def backfill_activities(session, conn, start: date, end: date) -> None:
 
 def store_wellness_day(conn, entry: dict) -> None:
     try:
-        d = entry["date"]
-        stats = entry.get("stats") or {}
-        sleep_dto = ((entry.get("sleep") or {}).get("dailySleepDTO")) or {}
-        training_status = entry.get("training_status") or {}
-        vo2_block = training_status.get("mostRecentVO2Max") or {}
-        vo2_source = vo2_block.get("generic") or vo2_block.get("cycling")
-        if isinstance(vo2_source, dict):
-            vo2max = vo2_source.get("vo2MaxValue") or vo2_source.get("vo2MaxPreciseValue")
-        else:
-            vo2max = vo2_source
-        weight_entry = entry.get("weight") or {}
-        weight_g = weight_entry.get("weight")
-
+        s = extract_wellness_summary(entry)
         raw_json = json.dumps({
-            "stats": stats,
+            "stats": entry.get("stats"),
             "sleep": entry.get("sleep"),
-            "training_status": training_status,
-            "weight": weight_entry or None,
+            "training_status": entry.get("training_status"),
+            "weight": entry.get("weight"),
         })
 
         conn.execute(
@@ -145,14 +119,9 @@ def store_wellness_day(conn, entry: dict) -> None:
                  body_battery_max=excluded.body_battery_max, stress_avg=excluded.stress_avg,
                  steps=excluded.steps, weight_kg=excluded.weight_kg, vo2max=excluded.vo2max,
                  raw_json=excluded.raw_json, synced_at=datetime('now')""",
-            (d, stats.get("restingHeartRate"),
-             ((sleep_dto.get("sleepScores") or {}).get("overall") or {}).get("value"),
-             sleep_dto.get("sleepTimeSeconds"),
-             stats.get("bodyBatteryLowestValue"), stats.get("bodyBatteryHighestValue"),
-             stats.get("averageStressLevel"), stats.get("totalSteps"),
-             (weight_g / 1000) if weight_g else None,
-             vo2max,
-             raw_json),
+            (s["date"], s["resting_hr"], s["sleep_score"], s["sleep_duration_s"],
+             s["body_battery_min"], s["body_battery_max"], s["stress_avg"], s["steps"],
+             s["weight_kg"], s["vo2max"], raw_json),
         )
     except Exception as exc:
         print(f"  WARNING: skipping wellness day {entry.get('date')} due to {exc!r}")
@@ -165,6 +134,7 @@ async def backfill_wellness(session, conn, start: date, end: date) -> None:
         try:
             data = await call_tool_json(session, "get_wellness", {
                 "start_date": chunk_start.isoformat(), "end_date": chunk_end.isoformat(),
+                "summary": False,  # need the full payload for the raw_json archive column
             })
         except Exception as exc:
             print(f"  WARNING: skipping wellness chunk {chunk_start}..{chunk_end} due to {exc!r}")

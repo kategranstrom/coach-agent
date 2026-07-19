@@ -28,6 +28,8 @@ from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
+from garmin_extract import extract_activity_summary, extract_wellness_summary
+
 TOKENSTORE = str(Path.home() / ".garminconnect")
 DAY_CALL_DELAY = 0.15  # pacing between per-day Garmin calls -- a tight loop of ~270
                         # unpaced calls per chunk appears to trigger silent
@@ -74,18 +76,32 @@ def _daterange(start: date, end: date):
 
 
 @mcp.tool()
-def get_activities(start_date: str, end_date: str) -> str:
-    """Get all activities (any sport) between start_date and end_date (YYYY-MM-DD, inclusive)."""
+def get_activities(start_date: str, end_date: str, summary: bool = True) -> str:
+    """Get activities (any sport) between start_date and end_date (YYYY-MM-DD, inclusive).
+
+    summary=True (default) returns a lean per-activity summary (sport, duration,
+    distance, HR, training load, a few technique fields) -- use this unless you
+    specifically need the full raw Garmin payload, which can be large enough
+    (many activities x tens of KB each) to exceed the tool result size limit
+    for wide date ranges.
+    """
     client = get_client()
     activities = client.get_activities_by_date(start_date, end_date)
+    if summary:
+        return json.dumps([extract_activity_summary(a) for a in activities])
     return json.dumps([_clean_activity(a) for a in activities])
 
 
 @mcp.tool()
-def get_wellness(start_date: str, end_date: str) -> str:
+def get_wellness(start_date: str, end_date: str, summary: bool = True) -> str:
     """Get merged daily wellness (resting HR, stress, steps, body battery,
     sleep, VO2max, weight) for each day between start_date and end_date
-    (YYYY-MM-DD, inclusive)."""
+    (YYYY-MM-DD, inclusive).
+
+    summary=True (default) returns a lean per-day summary -- the full sleep
+    payload alone (movement, HRV, respiration time series) is large enough
+    that a multi-week range can exceed the tool result size limit unsummarized.
+    """
     client = get_client()
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
@@ -118,6 +134,8 @@ def get_wellness(start_date: str, end_date: str) -> str:
         days.append(entry)
         time.sleep(DAY_CALL_DELAY)
 
+    if summary:
+        return json.dumps({"days": [extract_wellness_summary(e) for e in days]})
     return json.dumps({"days": days})
 
 
