@@ -6,11 +6,20 @@ functions; this file just exposes them as tools. Local Garmin activity/
 wellness data is served by the separate garmin_server.py.
 """
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 import memory
 import rules
 
-mcp = FastMCP("Coach Tools", port=8001)
+# DNS-rebinding protection (default: on, allowed_origins=[]) silently 403s any
+# request carrying an Origin header, including Claude Desktop's own connector
+# check -- guards against a malicious website's browser hitting a local server,
+# which isn't the threat model here (127.0.0.1-only, personal data, one real client).
+mcp = FastMCP(
+    "Coach Tools",
+    port=8001,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()

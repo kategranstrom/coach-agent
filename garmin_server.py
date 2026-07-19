@@ -26,13 +26,22 @@ from pathlib import Path
 
 from garminconnect import Garmin
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 TOKENSTORE = str(Path.home() / ".garminconnect")
 DAY_CALL_DELAY = 0.15  # pacing between per-day Garmin calls -- a tight loop of ~270
                         # unpaced calls per chunk appears to trigger silent
                         # server-side throttling (a hang, not a clean error)
 
-mcp = FastMCP("Garmin Connect (custom)", port=8000)
+# DNS-rebinding protection (default: on, allowed_origins=[]) silently 403s any
+# request carrying an Origin header, including Claude Desktop's own connector
+# check -- guards against a malicious website's browser hitting a local server,
+# which isn't the threat model here (127.0.0.1-only, personal data, one real client).
+mcp = FastMCP(
+    "Garmin Connect (custom)",
+    port=8000,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 _client: Garmin | None = None
 
