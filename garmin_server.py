@@ -101,6 +101,14 @@ def get_wellness(start_date: str, end_date: str, summary: bool = True) -> str:
     summary=True (default) returns a lean per-day summary -- the full sleep
     payload alone (movement, HRV, respiration time series) is large enough
     that a multi-week range can exceed the tool result size limit unsummarized.
+
+    sleep_score and stress_avg are Garmin's own proprietary composite scores
+    (Firstbeat-derived), not something computed here -- treat them as Garmin's
+    black-box model output. A day with a null sleep_score/sleep_duration_s
+    means the watch recorded no sleep data at all that night (not worn/charged),
+    not a parsing gap. vo2max can also legitimately go null after several weeks
+    without a qualifying run/ride -- Garmin stops surfacing a stale estimate
+    rather than carrying the last value forward indefinitely.
     """
     client = get_client()
     start = date.fromisoformat(start_date)
